@@ -63,7 +63,13 @@ def _find_document_root(soup: BeautifulSoup) -> Tag:
 def _extract_title(soup: BeautifulSoup) -> str | None:
     title_tag = soup.find("h1", class_=re.compile(r"ltx_title"))
     if title_tag:
-        return title_tag.get_text(" ", strip=True)
+        clone = BeautifulSoup(str(title_tag), "html.parser")
+        for sup in clone.find_all("sup"):
+            sup.decompose()
+        for note in clone.find_all(class_=re.compile(r"ltx_note|ltx_role_footnote")):
+            note.decompose()
+        title = clone.get_text(" ", strip=True)
+        return re.sub(r'\s+', ' ', title).strip()
     if soup.title:
         return soup.title.get_text(" ", strip=True)
     return None

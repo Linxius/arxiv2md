@@ -120,9 +120,12 @@ def _extract_title(summary: str, frontmatter: str | None) -> str | None:
 
 
 def _sanitize_filename(name: str) -> str:
-    name = re.sub(r'[<>:"/\\|?*]', '_', name)
-    name = re.sub(r'\s+', ' ', name).strip()
-    return name[:200] if name else "arxiv"
+    name = re.sub(r'[^\w]', '-', name, flags=re.UNICODE)
+    name = re.sub(r'-+', '-', name)
+    name = name.strip('-')
+    if not name:
+        return "arxiv"
+    return name[:200]
 
 
 def _default_filename(arxiv_id: str) -> str:
