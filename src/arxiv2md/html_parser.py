@@ -31,6 +31,7 @@ class ParsedArxivHtml:
     authors: list[str]
     abstract: str | None
     sections: list[SectionNode]
+    teaser_html: str | None = None
 
 
 def parse_arxiv_html(html: str) -> ParsedArxivHtml:
@@ -41,9 +42,10 @@ def parse_arxiv_html(html: str) -> ParsedArxivHtml:
     title = _extract_title(soup)
     authors = _extract_authors(soup)
     abstract = _extract_abstract(soup)
+    teaser_html = _extract_teaser(soup)
     sections = _extract_sections(document_root)
 
-    return ParsedArxivHtml(title=title, authors=authors, abstract=abstract, sections=sections)
+    return ParsedArxivHtml(title=title, authors=authors, abstract=abstract, sections=sections, teaser_html=teaser_html)
 
 
 def _find_document_root(soup: BeautifulSoup) -> Tag:
@@ -75,17 +77,18 @@ def _extract_authors(soup: BeautifulSoup) -> list[str]:
     if not authors_container:
         return []
 
-    author_nodes = authors_container.find_all(
-        lambda tag: tag.name == "span"
-        and "ltx_text" in tag.get("class", [])
-        and "ltx_font_bold" in tag.get("class", [])
-    )
+    # 优先寻找明确的作者类
+    author_nodes = authors_container.find_all(class_=re.compile(r"ltx_author|ltx_personname"))
     if not author_nodes:
-        author_nodes = authors_container.find_all(class_=re.compile(r"ltx_author|ltx_personname"))
+        # 兼容模式：寻找带有 ltx_text 的 span，不再强制要求 ltx_font_bold
+        author_nodes = authors_container.find_all(
+            lambda tag: tag.name == "span" and "ltx_text" in tag.get("class", [])
+        )
 
     authors: list[str] = []
     for node in author_nodes:
-        for text in _clean_author_text(node):
+        cleaned_parts = _clean_author_text(node)
+        for text in cleaned_parts:
             if text and text not in authors:
                 authors.append(text)
     return authors
@@ -109,7 +112,7 @@ def _clean_author_text(node: Tag) -> list[str]:
         if not part:
             continue
         # Strip leading & (author separator in some papers)
-        part = part.lstrip("&").strip()
+        part = part.lstrip("&").strip().rstrip(",")
         if not part:
             continue
         # Skip emails
@@ -126,7 +129,8 @@ def _clean_author_text(node: Tag) -> list[str]:
         if len(part) > _MAX_AUTHOR_PART_LENGTH:
             continue
         # Skip text that looks like a sentence (contains multiple periods or common sentence patterns)
-        if part.count(".") > 1 or (part.endswith(".") and len(part) > 40):
+        # Modified: Allow initials (e.g., D. M. Nguyen) by checking if the part is short
+        if part.count(".") > 1 and len(part) > 30 or (part.endswith(".") and len(part) > 40):
             continue
         cleaned.append(part)
     return cleaned
@@ -137,6 +141,16 @@ def _extract_abstract(soup: BeautifulSoup) -> str | None:
     if not abstract:
         return None
     return abstract.get_text(" ", strip=True)
+
+
+def _extract_teaser(soup: BeautifulSoup) -> str | None:
+    """Extract teaser image container HTML."""
+    teaser_spans = soup.find_all("span", string=re.compile(r"teaser"))
+    for span in teaser_spans:
+        parent = span.parent
+        if parent:
+            return str(parent)
+    return None
 
 
 def _extract_sections(root: Tag) -> list[SectionNode]:

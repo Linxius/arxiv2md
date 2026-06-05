@@ -77,7 +77,7 @@ async def _fetch_with_retries(url: str) -> str:
 
     for attempt in range(ARXIV2MD_FETCH_MAX_RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, verify=False) as client:
                 response = await client.get(url)
 
             # Check for 404 specifically to provide a better error message

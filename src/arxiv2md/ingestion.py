@@ -27,7 +27,7 @@ async def ingest_paper(
     include_frontmatter: bool = False,
 ) -> tuple[IngestionResult, dict[str, str | list[str] | None]]:
     """Fetch, parse, and serialize an arXiv paper into Markdown.
-
+    
     Parameters
     ----------
     remove_inline_citations : bool
@@ -36,6 +36,10 @@ async def ingest_paper(
     """
     html, source_url = await fetch_arxiv_html(html_url, arxiv_id=arxiv_id, version=version, use_cache=True, ar5iv_url=ar5iv_url)
     parsed = parse_arxiv_html(html)
+    
+    # Compute base URL for images and links
+    # The HTML src usually starts with <arxiv_id>v<version>/...
+    base_url = "https://arxiv.org/html/"
 
     filtered_sections = filter_sections(parsed.sections, mode=section_filter_mode, selected=sections)
     if remove_refs:
@@ -49,7 +53,12 @@ async def ingest_paper(
         include_abstract = not sections or _ABSTRACT_TITLE in selected_lower
 
     for section in filtered_sections:
-        _populate_section_markdown(section, remove_inline_citations=remove_inline_citations, base_url=source_url)
+        _populate_section_markdown(section, remove_inline_citations=remove_inline_citations, base_url=base_url)
+
+    # Convert teaser HTML to markdown
+    teaser_markdown = None
+    if parsed.teaser_html:
+        teaser_markdown = convert_fragment_to_markdown(parsed.teaser_html, base_url=base_url)
 
     result = format_paper(
         arxiv_id=arxiv_id,
@@ -61,6 +70,7 @@ async def ingest_paper(
         include_toc=not remove_toc,
         include_abstract_in_tree=parsed.abstract is not None,
         include_frontmatter=include_frontmatter,
+        teaser=teaser_markdown,
     )
 
     metadata = {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urljoin
+from typing import Iterable
 
 try:
     from bs4 import BeautifulSoup
@@ -15,7 +15,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency check
 _EQUATION_TABLE_RE = re.compile(r"ltx_equationgroup|ltx_eqn_align|ltx_eqn_table")
 
 
-def convert_html_to_markdown(html: str, *, remove_refs: bool = False, remove_toc: bool = False) -> str:
+def convert_html_to_markdown(html: str, *, remove_refs: bool = False, remove_toc: bool = False, base_url: str | None = None) -> str:
     """Convert arXiv HTML into Markdown."""
     soup = BeautifulSoup(html, "html.parser")
     toc_markdown = None
@@ -43,6 +43,7 @@ def convert_html_to_markdown(html: str, *, remove_refs: bool = False, remove_toc
         authors_text = _normalize_text(authors_tag.get_text(" ", strip=True))
         if authors_text:
             blocks.append(f"Authors: {authors_text}")
+
     if toc_markdown:
         blocks.append("## Contents\n" + toc_markdown)
     if abstract_tag:
@@ -52,32 +53,26 @@ def convert_html_to_markdown(html: str, *, remove_refs: bool = False, remove_toc
         if tag:
             tag.decompose()
 
-    blocks.extend(_serialize_children(root))
+    blocks.extend(_serialize_children(root, base_url=base_url))
 
     return "\n\n".join(block for block in blocks if block).strip()
 
 
 def convert_fragment_to_markdown(html: str, *, remove_inline_citations: bool = False, base_url: str | None = None) -> str:
     """Convert an HTML fragment into Markdown without title/author/abstract handling.
-
+    
     Parameters
     ----------
     html : str
-        The HTML fragment to convert.
     remove_inline_citations : bool
         If True, completely remove inline citation links. If False (default),
         citation links are converted to plain text (URL stripped).
-    base_url : str | None
-        Base URL to resolve relative image paths against. When provided,
-        relative ``<img src>`` attributes are converted to absolute URLs.
     """
     soup = BeautifulSoup(html, "html.parser")
     _strip_unwanted_elements(soup)
     convert_all_mathml_to_latex(soup)
     fix_tabular_tables(soup)
-    if base_url:
-        _resolve_image_urls(soup, base_url)
-    blocks = _serialize_children(soup, remove_inline_citations=remove_inline_citations)
+    blocks = _serialize_children(soup, remove_inline_citations=remove_inline_citations, base_url=base_url)
     return "\n\n".join(block for block in blocks if block).strip()
 
 
@@ -120,35 +115,24 @@ def fix_tabular_tables(root: BeautifulSoup) -> None:
             _remove_all_attributes(child)
 
 
-def _resolve_image_urls(root: BeautifulSoup, base_url: str) -> None:
-    """Resolve relative ``<img src>`` attributes to absolute URLs."""
-    # Ensure base_url ends with '/' so urljoin resolves relative paths correctly
-    if not base_url.endswith("/"):
-        base_url += "/"
-    for img in root.find_all("img"):
-        src = img.get("src")
-        if src and not src.startswith(("http://", "https://", "data:")):
-            img["src"] = urljoin(base_url, src)
-
-
 def _remove_all_attributes(tag: Tag) -> None:
     tag.attrs = {}
 
 
-def _serialize_children(container: Tag, *, remove_inline_citations: bool = False) -> list[str]:
+def _serialize_children(container: Tag, *, remove_inline_citations: bool = False, base_url: str | None = None) -> list[str]:
     blocks: list[str] = []
     for child in container.children:
         if isinstance(child, NavigableString):
             continue
         if not isinstance(child, Tag):
             continue
-        blocks.extend(_serialize_block(child, remove_inline_citations=remove_inline_citations))
+        blocks.extend(_serialize_block(child, remove_inline_citations=remove_inline_citations, base_url=base_url))
     return blocks
 
 
-def _serialize_block(tag: Tag, *, remove_inline_citations: bool = False) -> list[str]:
+def _serialize_block(tag: Tag, *, remove_inline_citations: bool = False, base_url: str | None = None) -> list[str]:
     if tag.name in {"section", "article", "div", "span"}:
-        return _serialize_children(tag, remove_inline_citations=remove_inline_citations)
+        return _serialize_children(tag, remove_inline_citations=remove_inline_citations, base_url=base_url)
 
     if tag.name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
         level = int(tag.name[1])
@@ -157,24 +141,41 @@ def _serialize_block(tag: Tag, *, remove_inline_citations: bool = False) -> list
             return []
         return [f"{'#' * level} {heading}"]
 
+    if tag.name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+        level = int(tag.name[1])
+        heading = _normalize_text(tag.get_text(" ", strip=True))
+        if not heading:
+            return []
+        return [f"{'#' * level} {heading}"]
+
+    if tag.name == "img":
+        src = tag.get("src")
+        alt = tag.get("alt")
+        if src and base_url and not src.startswith(("http://", "https://")):
+            src = base_url + src
+        if src:
+            image_label = alt or "Image"
+            return [f"![{image_label}]({src})"]
+        return []
+
     if tag.name == "p":
-        paragraph = _serialize_paragraph(tag, remove_inline_citations=remove_inline_citations)
+        paragraph = _serialize_paragraph(tag, remove_inline_citations=remove_inline_citations, base_url=base_url)
         return [paragraph] if paragraph else []
 
     if tag.name in {"ul", "ol"}:
-        lines = _serialize_list(tag, remove_inline_citations=remove_inline_citations)
+        lines = _serialize_list(tag, remove_inline_citations=remove_inline_citations, base_url=base_url)
         return ["\n".join(lines)] if lines else []
 
     if tag.name == "figure":
-        figure = _serialize_figure(tag, remove_inline_citations=remove_inline_citations)
+        figure = _serialize_figure(tag, remove_inline_citations=remove_inline_citations, base_url=base_url)
         return [figure] if figure else []
 
     if tag.name == "table":
-        table_md = _serialize_table(tag, remove_inline_citations=remove_inline_citations)
+        table_md = _serialize_table(tag, remove_inline_citations=remove_inline_citations, base_url=base_url)
         return [table_md] if table_md else []
 
     if tag.name == "blockquote":
-        content = _normalize_text(_serialize_inline(tag, remove_inline_citations=remove_inline_citations))
+        content = _normalize_text(_serialize_inline(tag, remove_inline_citations=remove_inline_citations, base_url=base_url))
         if not content:
             return []
         return ["> " + content]
@@ -182,7 +183,7 @@ def _serialize_block(tag: Tag, *, remove_inline_citations: bool = False) -> list
     if tag.name == "br":
         return []
 
-    return _serialize_children(tag, remove_inline_citations=remove_inline_citations)
+    return _serialize_children(tag, remove_inline_citations=remove_inline_citations, base_url=base_url)
 
 
 def _serialize_abstract(tag: Tag) -> list[str]:
@@ -201,8 +202,8 @@ def _serialize_abstract(tag: Tag) -> list[str]:
     return blocks
 
 
-def _serialize_paragraph(tag: Tag, *, remove_inline_citations: bool = False) -> str:
-    content = _serialize_inline(tag, remove_inline_citations=remove_inline_citations)
+def _serialize_paragraph(tag: Tag, *, remove_inline_citations: bool = False, base_url: str | None = None) -> str:
+    content = _serialize_inline(tag, remove_inline_citations=remove_inline_citations, base_url=base_url)
     content = _cleanup_inline_text(content)
     return content
 
@@ -221,21 +222,30 @@ def _is_internal_paper_link(href: str | None) -> bool:
     return "arxiv.org/html/" in href and "#" in href and "#bib" not in href
 
 
-def _serialize_inline(node: Tag | NavigableString, *, remove_inline_citations: bool = False) -> str:
+def _serialize_inline(node: Tag | NavigableString, *, remove_inline_citations: bool = False, base_url: str | None = None) -> str:
     if isinstance(node, NavigableString):
         return str(node)
+
+    if node.name == "img":
+        src = node.get("src")
+        alt = node.get("alt")
+        if src and base_url and not src.startswith(("http://", "https://")):
+            src = base_url + src
+        if src:
+            return f" ![{alt or 'Image'}]({src}) "
+        return ""
 
     if node.name == "br":
         return "\n"
 
     if node.name in {"em", "i"}:
-        return f"*{_serialize_children_inline(node, remove_inline_citations=remove_inline_citations)}*"
+        return f"*{_serialize_children_inline(node, remove_inline_citations=remove_inline_citations, base_url=base_url)}*"
 
     if node.name in {"strong", "b"}:
-        return f"**{_serialize_children_inline(node, remove_inline_citations=remove_inline_citations)}**"
+        return f"**{_serialize_children_inline(node, remove_inline_citations=remove_inline_citations, base_url=base_url)}**"
 
     if node.name == "a":
-        text = _serialize_children_inline(node, remove_inline_citations=remove_inline_citations).strip()
+        text = _serialize_children_inline(node, remove_inline_citations=remove_inline_citations, base_url=base_url).strip()
         href = node.get("href")
         # Handle citation links specially
         if _is_citation_link(href):
@@ -251,27 +261,27 @@ def _serialize_inline(node: Tag | NavigableString, *, remove_inline_citations: b
         return text
 
     if node.name == "sup":
-        text = _serialize_children_inline(node, remove_inline_citations=remove_inline_citations).strip()
+        text = _serialize_children_inline(node, remove_inline_citations=remove_inline_citations, base_url=base_url).strip()
         return f"^{text}" if text else ""
 
     if node.name == "cite":
         if remove_inline_citations and "ltx_cite" in node.get("class", []):
             return ""
-        return _serialize_children_inline(node, remove_inline_citations=remove_inline_citations)
+        return _serialize_children_inline(node, remove_inline_citations=remove_inline_citations, base_url=base_url)
 
     if node.name == "math":
         text = node.get_text(" ", strip=True)
         return f"${text}$" if text else ""
 
     if "ltx_note" in node.get("class", []):
-        text = _normalize_text(_serialize_children_inline(node, remove_inline_citations=remove_inline_citations))
+        text = _normalize_text(_serialize_children_inline(node, remove_inline_citations=remove_inline_citations, base_url=base_url))
         return f"({text})" if text else ""
 
-    return _serialize_children_inline(node, remove_inline_citations=remove_inline_citations)
+    return _serialize_children_inline(node, remove_inline_citations=remove_inline_citations, base_url=base_url)
 
 
-def _serialize_children_inline(tag: Tag, *, remove_inline_citations: bool = False) -> str:
-    return "".join(_serialize_inline(child, remove_inline_citations=remove_inline_citations) for child in tag.children)
+def _serialize_children_inline(tag: Tag, *, remove_inline_citations: bool = False, base_url: str | None = None) -> str:
+    return "".join(_serialize_inline(child, remove_inline_citations=remove_inline_citations, base_url=base_url) for child in tag.children)
 
 
 def _cleanup_inline_text(text: str) -> str:
@@ -280,7 +290,7 @@ def _cleanup_inline_text(text: str) -> str:
     return text.strip()
 
 
-def _serialize_list(list_tag: Tag, indent: int = 0, *, remove_inline_citations: bool = False) -> list[str]:
+def _serialize_list(list_tag: Tag, indent: int = 0, *, remove_inline_citations: bool = False, base_url: str | None = None) -> list[str]:
     lines: list[str] = []
     for item in list_tag.find_all("li", recursive=False):
         item_text_parts: list[str] = []
@@ -289,12 +299,12 @@ def _serialize_list(list_tag: Tag, indent: int = 0, *, remove_inline_citations: 
             if isinstance(child, Tag) and child.name in {"ul", "ol"}:
                 nested_lists.append(child)
             else:
-                item_text_parts.append(_serialize_inline(child, remove_inline_citations=remove_inline_citations))
+                item_text_parts.append(_serialize_inline(child, remove_inline_citations=remove_inline_citations, base_url=base_url))
         item_text = _cleanup_inline_text("".join(item_text_parts))
         prefix = "  " * indent + "- "
         lines.append(prefix + item_text if item_text else prefix.rstrip())
         for nested in nested_lists:
-            lines.extend(_serialize_list(nested, indent + 1, remove_inline_citations=remove_inline_citations))
+            lines.extend(_serialize_list(nested, indent + 1, remove_inline_citations=remove_inline_citations, base_url=base_url))
     return lines
 
 
@@ -306,13 +316,14 @@ def _serialize_toc(toc_nav: Tag) -> str:
     return "\n".join(lines)
 
 
-def _serialize_table(table: Tag, *, remove_inline_citations: bool = False) -> str:
+def _serialize_table(table: Tag, *, remove_inline_citations: bool = False, base_url: str | None = None) -> str:
     classes = " ".join(table.get("class", []))
     if _EQUATION_TABLE_RE.search(classes):
         eqn_text = _normalize_text(table.get_text(" ", strip=True))
         if not eqn_text:
             return ""
-        return f"$$ {eqn_text} $$"
+        # return f"$$ {eqn_text} $$"
+        return f"{eqn_text}"
 
     rows = []
     # Find rows in tbody, thead, tfoot, or directly in table
@@ -328,18 +339,18 @@ def _serialize_table(table: Tag, *, remove_inline_citations: bool = False) -> st
                     continue
                 values = []
                 for cell in cells:
-                    cell_text = _cleanup_inline_text(_serialize_inline(cell, remove_inline_citations=remove_inline_citations)).replace("\n", "<br>")
+                    cell_text = _cleanup_inline_text(_serialize_inline(cell, remove_inline_citations=remove_inline_citations, base_url=base_url)).replace("\n", "<br>")
                     values.append(cell_text)
                 rows.append(values)
     else:
-        # Table has no tbody/thead/tfoot - find rows directly in table
+        # Table has no tbody/thead/tfoot - search for rows directly in table
         for row in table.find_all("tr", recursive=False):
             cells = row.find_all(["th", "td"], recursive=False)
             if not cells:
                 continue
             values = []
             for cell in cells:
-                cell_text = _cleanup_inline_text(_serialize_inline(cell, remove_inline_citations=remove_inline_citations)).replace("\n", "<br>")
+                cell_text = _cleanup_inline_text(_serialize_inline(cell, remove_inline_citations=remove_inline_citations, base_url=base_url)).replace("\n", "<br>")
                 values.append(cell_text)
             rows.append(values)
 
@@ -358,13 +369,13 @@ def _serialize_table(table: Tag, *, remove_inline_citations: bool = False) -> st
     return "\n".join(lines)
 
 
-def _serialize_figure(figure: Tag, *, remove_inline_citations: bool = False) -> str:
+def _serialize_figure(figure: Tag, *, remove_inline_citations: bool = False, base_url: str | None = None) -> str:
     # Check if this is a table figure (ltx_table class)
     figure_classes = " ".join(figure.get("class", []))
     is_table_figure = "ltx_table" in figure_classes
 
     caption_tag = figure.find("figcaption")
-    caption = _normalize_text(_serialize_inline(caption_tag, remove_inline_citations=remove_inline_citations)) if caption_tag else ""
+    caption = _normalize_text(_serialize_inline(caption_tag, remove_inline_citations=remove_inline_citations, base_url=base_url)) if caption_tag else ""
 
     lines = []
 
@@ -373,7 +384,7 @@ def _serialize_figure(figure: Tag, *, remove_inline_citations: bool = False) -> 
         # Note: fix_tabular_tables strips attributes, so search for any table element
         table = figure.find("table")
         if table:
-            table_md = _serialize_table(table, remove_inline_citations=remove_inline_citations)
+            table_md = _serialize_table(table, remove_inline_citations=remove_inline_citations, base_url=base_url)
             if caption:
                 lines.append(f"**{caption}**")
             if table_md:
@@ -386,15 +397,18 @@ def _serialize_figure(figure: Tag, *, remove_inline_citations: bool = False) -> 
         img = figure.find("img")
         src = img.get("src") if img else None
         alt = img.get("alt") if img else None
+        
+        if src and base_url and not src.startswith(("http://", "https://")):
+            src = base_url + src
 
-        if caption:
-            lines.append(f"Figure: {caption}")
         if src:
             image_label = alt or "Image"
-            lines.append(f"{image_label}: {src}")
+            lines.append(f"![{image_label}]({src})")
+        if caption:
+            lines.append(f"{caption}")
 
     return "\n".join(lines).strip()
 
 
 def _normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()

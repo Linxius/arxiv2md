@@ -26,6 +26,7 @@ def format_paper(
     include_toc: bool,
     include_abstract_in_tree: bool = True,
     include_frontmatter: bool = False,
+    teaser: str | None = None,
 ) -> IngestionResult:
     """Create summary, section tree, and content."""
     tree_lines = ["Sections:"]
@@ -33,7 +34,7 @@ def format_paper(
         tree_lines.append("Abstract")
     tree_lines.append(_create_sections_tree(sections))
     tree = "\n".join(tree_lines)
-    content = _render_content(abstract=abstract, sections=sections, include_toc=include_toc)
+    content = _render_content(abstract=abstract, sections=sections, include_toc=include_toc, teaser=teaser)
 
     section_count = count_sections(sections)
     token_estimate = _format_token_count(tree + "\n" + content)
@@ -42,15 +43,11 @@ def format_paper(
     if title:
         summary_lines.append(f"Title: {title}")
     summary_lines.append(f"ArXiv: {arxiv_id}")
-    if version:
-        summary_lines.append(f"Version: {version}")
     if authors:
         summary_lines.append(f"Authors: {', '.join(authors)}")
-    summary_lines.append(f"Sections: {section_count}")
-    if token_estimate:
-        summary_lines.append(f"Estimated tokens: {token_estimate}")
-
-    summary = "\n".join(summary_lines)
+    # if token_estimate:
+    #     summary_lines.append(f"Estimated tokens: {token_estimate}")
+    summary = "\n\n".join(summary_lines)
 
     frontmatter = None
     if include_frontmatter:
@@ -111,12 +108,16 @@ def _render_content(
     abstract: str | None,
     sections: list[SectionNode],
     include_toc: bool,
+    teaser: str | None = None,
 ) -> str:
     blocks: list[str] = []
     if include_toc:
         toc = _render_toc(sections)
         if toc:
             blocks.append("## Contents\n" + toc)
+
+    if teaser:
+        blocks.append(teaser.strip())
 
     if abstract:
         blocks.append("## Abstract")
