@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -32,10 +33,11 @@ def main() -> None:
 
 async def _async_main(args: argparse.Namespace) -> None:
     query = parse_arxiv_input(args.input_text)
+    arxiv_id = query.arxiv_id
 
     sections = _collect_sections(args.sections, args.section)
     result, _metadata = await ingest_paper(
-        arxiv_id=query.arxiv_id,
+        arxiv_id=arxiv_id,
         version=query.version,
         html_url=query.html_url,
         ar5iv_url=query.ar5iv_url,
@@ -54,16 +56,21 @@ async def _async_main(args: argparse.Namespace) -> None:
         include_tree=args.include_tree,
         frontmatter=result.frontmatter,
     )
-    output_target = args.output if args.output is not None else DEFAULT_OUTPUT_FILE
+    output_dir = args.output if args.output is not None else Path(".")
 
-    if output_target == "-":
+    if output_dir == Path("-"):
         sys.stdout.write(output_text)
         if not output_text.endswith("\n"):
             sys.stdout.write("\n")
         sys.stdout.flush()
     else:
-        Path(output_target).write_text(output_text, encoding="utf-8")
-        print(f"Output written to: {output_target}")
+        output_path = Path(output_dir)
+        title = _extract_title(result.summary, result.frontmatter)
+        filename = _sanitize_filename(title or _default_filename(arxiv_id)) + ".md"
+        output_path = output_path / filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(output_text, encoding="utf-8")
+        print(f"Output written to: {output_path}")
         print("\nSummary:")
         print(result.summary)
 
@@ -94,6 +101,32 @@ def _collect_sections(sections_csv: str | None, section_list: list[str] | None) 
     if section_list:
         values.extend(section_list)
     return [value.strip() for value in values if value and value.strip()]
+
+
+def _extract_title(summary: str, frontmatter: str | None) -> str | None:
+    if frontmatter and "---" in frontmatter:
+        in_title = False
+        for line in frontmatter.split("\n"):
+            if line.startswith("title:"):
+                in_title = True
+                title = line.split(":", 1)[1].strip().strip("\"'")
+                return title
+            if in_title:
+                break
+    for line in summary.split("\n"):
+        if line.startswith("Title: "):
+            return line[len("Title: "):]
+    return None
+
+
+def _sanitize_filename(name: str) -> str:
+    name = re.sub(r'[<>:"/\\|?*]', '_', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name[:200] if name else "arxiv"
+
+
+def _default_filename(arxiv_id: str) -> str:
+    return arxiv_id.replace("/", "_")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -140,7 +173,7 @@ def _parse_args() -> argparse.Namespace:
         "--output",
         "-o",
         default=None,
-        help="Output file path. Use '-' to write to stdout.",
+        help="Output directory. Title-based .md files will be created. Use '-' to write to stdout.",
     )
     parser.add_argument(
         "--include-tree",
