@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from typing import TYPE_CHECKING, cast
 
 from arxiv2md.cache import evict_if_needed
@@ -98,6 +99,7 @@ async def process_query(
         )
 
     _log_success(url=query.html_url, summary=summary)
+    shutil.rmtree(ARXIV2MD_CACHE_PATH, ignore_errors=True)
     digest_url = _generate_digest_url(query)
 
     return IngestSuccessResponse(

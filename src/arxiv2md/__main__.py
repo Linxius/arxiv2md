@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import re
+import shutil
 import sys
 from pathlib import Path
 
+from arxiv2md.config import ARXIV2MD_CACHE_PATH
 from arxiv2md.ingestion import ingest_paper
 from arxiv2md.query_parser import parse_arxiv_input
 
@@ -73,6 +75,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         print(f"Output written to: {output_path}")
         print("\nSummary:")
         print(result.summary)
+        shutil.rmtree(ARXIV2MD_CACHE_PATH, ignore_errors=True)
 
 
 def _format_output(
