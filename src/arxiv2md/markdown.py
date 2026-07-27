@@ -152,7 +152,11 @@ def _serialize_block(tag: Tag, *, remove_inline_citations: bool = False, base_ur
         src = tag.get("src")
         alt = tag.get("alt")
         if src and base_url and not src.startswith(("http://", "https://")):
-            src = base_url + src
+            # Strip leading /html/ if present — base_url already includes it.
+            # arXiv HTML sources may be:
+            #   /html/2311.10091/assets/x2.png  (absolute path → base_url slug duplicate)
+            #   2311.10091/assets/x2.png         (relative path → safe)
+            src = base_url + src.removeprefix("/html/")
         if src:
             image_label = alt or "Image"
             return [f"![{image_label}]({src})"]
@@ -230,7 +234,11 @@ def _serialize_inline(node: Tag | NavigableString, *, remove_inline_citations: b
         src = node.get("src")
         alt = node.get("alt")
         if src and base_url and not src.startswith(("http://", "https://")):
-            src = base_url + src
+            # Strip leading /html/ if present — base_url already includes it.
+            # arXiv HTML sources may be:
+            #   /html/2311.10091/assets/x2.png  (absolute path → base_url slug duplicate)
+            #   2311.10091/assets/x2.png         (relative path → safe)
+            src = base_url + src.removeprefix("/html/")
         if src:
             return f" ![{alt or 'Image'}]({src}) "
         return ""
@@ -399,7 +407,11 @@ def _serialize_figure(figure: Tag, *, remove_inline_citations: bool = False, bas
         alt = img.get("alt") if img else None
         
         if src and base_url and not src.startswith(("http://", "https://")):
-            src = base_url + src
+            # Strip leading /html/ if present — base_url already includes it.
+            # arXiv HTML sources may be:
+            #   /html/2311.10091/assets/x2.png  (absolute path → base_url slug duplicate)
+            #   2311.10091/assets/x2.png         (relative path → safe)
+            src = base_url + src.removeprefix("/html/")
 
         if src:
             image_label = alt or "Image"
