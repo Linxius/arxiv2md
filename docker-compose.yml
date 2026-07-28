@@ -15,7 +15,7 @@ services:
       - ARXIV2MD_CACHE_PATH=/app/.arxiv2md_cache
       - ARXIV2MD_CACHE_TTL_SECONDS=86400
       - APP_VERSION=0.1.0
-      - APP_REPOSITORY=https://github.com/timf34/arxiv2md
+      - APP_REPOSITORY=https://github.com/Linxius/arxiv2md
     volumes:
       # Persistent cache
       - arxiv2md_cache:/app/.arxiv2md_cache

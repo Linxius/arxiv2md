@@ -7,7 +7,7 @@ function formatStarCount(count) {
 
 async function fetchGitHubStars() {
     try {
-        const res = await fetch('https://api.github.com/repos/timf34/arxiv2md');
+        const res = await fetch('https://api.github.com/repos/Linxius/arxiv2md');
 
         if (!res.ok) {throw new Error(`${res.status} ${res.statusText}`);}
         const data = await res.json();

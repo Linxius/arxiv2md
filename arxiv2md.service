@@ -3,7 +3,7 @@
 
 [Unit]
 Description=arxiv2md - arXiv to Markdown converter
-Documentation=https://github.com/timf34/arxiv2md
+Documentation=https://github.com/Linxius/arxiv2md
 After=network.target docker.service
 Requires=docker.service
 
