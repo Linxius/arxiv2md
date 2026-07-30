@@ -58,19 +58,23 @@ async def _async_main(args: argparse.Namespace) -> None:
         include_tree=args.include_tree,
         frontmatter=result.frontmatter,
     )
-    output_dir = args.output if args.output is not None else Path(".")
+    output_dest = args.output if args.output is not None else Path(".")
 
-    if output_dir == Path("-"):
+    if output_dest == Path("-"):
         sys.stdout.write(output_text)
         if not output_text.endswith("\n"):
             sys.stdout.write("\n")
         sys.stdout.flush()
     else:
-        output_path = Path(output_dir)
-        title = _extract_title(result.summary, result.frontmatter)
-        filename = _sanitize_filename(title or _default_filename(arxiv_id)) + ".md"
-        output_path = output_path / filename
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path = Path(output_dest)
+        # If output ends with .md, treat as direct file path; otherwise treat as directory
+        if output_path.suffix.lower() == ".md":
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            title = _extract_title(result.summary, result.frontmatter)
+            filename = _sanitize_filename(title or _default_filename(arxiv_id)) + ".md"
+            output_path = output_path / filename
+            output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(output_text, encoding="utf-8")
         print(f"Output written to: {output_path}")
         print("\nSummary:")
